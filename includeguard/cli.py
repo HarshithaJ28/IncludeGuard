@@ -16,6 +16,7 @@ import sys
 from includeguard.analyzer.parser import IncludeParser
 from includeguard.analyzer.graph import DependencyGraph
 from includeguard.analyzer.estimator import CostEstimator
+from includeguard.ui.html_report import HTMLReportGenerator
 
 console = Console()
 
@@ -144,8 +145,10 @@ def analyze(project_path, output, json_output, dot_output, max_files, extensions
     
     # Export HTML report
     if output:
-        console.print(f"\\n[cyan]HTML report generation would be at: {output}[/cyan]")
-        console.print("[yellow]Note: HTML report generator not yet implemented[/yellow]")
+        console.print(f"\n[cyan]Generating HTML report...[/cyan]")
+        html_gen = HTMLReportGenerator()
+        html_gen.generate(reports, summary, graph_stats, output)
+        console.print(f"[green]✓[/green] HTML report saved to: [bold]{output}[/bold]")
     
     # Export JSON
     if json_output:
