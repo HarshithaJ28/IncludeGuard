@@ -12,7 +12,9 @@ class HTMLReportGenerator:
                 reports: List[Dict],
                 summary: Dict,
                 graph_stats: Dict,
-                output_path: str):
+                output_path: str,
+                forward_decls: List[Dict] = None,
+                pch_recommendations: List[Dict] = None):
         """
         Generate complete HTML report.
         
@@ -21,12 +23,16 @@ class HTMLReportGenerator:
             summary: Project summary
             graph_stats: Graph statistics
             output_path: Where to save HTML file
+            forward_decls: Forward declaration opportunities
+            pch_recommendations: PCH recommendations
         """
-        html = self._generate_html(reports, summary, graph_stats)
+        html = self._generate_html(reports, summary, graph_stats, 
+                                   forward_decls or [], 
+                                   pch_recommendations or [])
         Path(output_path).write_text(html, encoding='utf-8')
         print(f"HTML report saved to: {output_path}")
     
-    def _generate_html(self, reports, summary, graph_stats):
+    def _generate_html(self, reports, summary, graph_stats, forward_decls, pch_recommendations):
         """Generate the HTML content"""
         
         # Prepare data for charts
@@ -368,6 +374,123 @@ class HTMLReportGenerator:
                 </tbody>
             </table>
         </div>
+"""
+        
+        # Forward Declaration Opportunities
+        if forward_decls:
+            html += """
+        <!-- Forward Declaration Opportunities -->
+        <div class="card">
+            <h2>💡 Forward Declaration Opportunities</h2>
+            <p style="color: #aaa; margin-bottom: 20px;">
+                Replace expensive includes with forward declarations when only using pointers/references:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>File</th>
+                        <th>Replace Include</th>
+                        <th>With Forward Decl</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+            
+            for i, opp in enumerate(forward_decls[:15], 1):
+                conf = opp['confidence']
+                badge_class = 'badge-success' if conf > 0.7 else 'badge-warning' if conf > 0.5 else 'badge-secondary'
+                
+                html += f"""
+                    <tr>
+                        <td>{i}</td>
+                        <td><code>{opp['file']}</code></td>
+                        <td><code>#include "{opp['header']}"</code></td>
+                        <td><code style="color: #51cf66">{opp['suggestion']}</code></td>
+                        <td><span class="{badge_class}">{conf:.0%}</span></td>
+                    </tr>
+"""
+            
+            html += """
+                </tbody>
+            </table>
+            <div style="margin-top: 15px; padding: 10px; background: rgba(81, 207, 102, 0.1); border-left: 3px solid #51cf66; border-radius: 5px;">
+                <strong>💡 Tip:</strong> Forward declarations work when you only use pointers/references. 
+                This can dramatically reduce compile times by avoiding expensive template header parsing.
+            </div>
+        </div>
+"""
+        
+        # PCH Recommendations
+        if pch_recommendations:
+            html += """
+        <!-- Precompiled Header Recommendations -->
+        <div class="card">
+            <h2>🔧 Precompiled Header (PCH) Recommendations</h2>
+            <p style="color: #aaa; margin-bottom: 20px;">
+                These headers are used frequently and expensive to compile. Consider adding them to a precompiled header:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Header</th>
+                        <th>Used By</th>
+                        <th>Cost</th>
+                        <th>PCH Score</th>
+                        <th>Est. Savings</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+            
+            for i, rec in enumerate(pch_recommendations[:15], 1):
+                score = rec['pch_score']
+                badge_class = 'badge-danger' if score > 10000 else 'badge-warning'
+                
+                html += f"""
+                    <tr>
+                        <td>{i}</td>
+                        <td><code>{rec['header']}</code></td>
+                        <td>{rec['usage_count']} files</td>
+                        <td>{rec['cost']:.0f}</td>
+                        <td><span class="{badge_class}">{score:.0f}</span></td>
+                        <td class="cost-low">{rec['estimated_savings']:.0f}</td>
+                    </tr>
+"""
+            
+            html += """
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 20px; padding: 15px; background: rgba(138, 80, 243, 0.1); border-left: 3px solid #8a50f7; border-radius: 5px;">
+                <strong>📚 Suggested PCH File (pch.h):</strong>
+                <pre style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; overflow-x: auto;">
+<code style="color: #51cf66;">// Precompiled Header
+#ifndef PCH_H
+#define PCH_H
+
+"""
+            
+            # Add top headers to PCH file
+            for rec in pch_recommendations[:10]:
+                html += f"""// Used by {rec['usage_count']} files, cost: {rec['cost']:.0f}
+#include {rec['header']}
+"""
+            
+            html += """
+#endif // PCH_H
+</code></pre>
+                <p style="margin-top: 10px; color: #aaa; font-size: 0.9em;">
+                    Compile with: <code style="color: #00d4ff;">g++ -x c++-header pch.h -o pch.h.gch</code><br>
+                    Then use in your build with: <code style="color: #00d4ff;">-include pch.h</code>
+                </p>
+            </div>
+        </div>
+"""
+        
+        html += """
         
         <!-- Recommendations -->
         <div class="card">

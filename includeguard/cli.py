@@ -16,6 +16,9 @@ import sys
 from includeguard.analyzer.parser import IncludeParser
 from includeguard.analyzer.graph import DependencyGraph
 from includeguard.analyzer.estimator import CostEstimator
+from includeguard.analyzer.forward_declaration import ForwardDeclarationDetector
+from includeguard.analyzer.pch_recommender import PCHRecommender
+from includeguard.analyzer.build_profiler import BuildProfiler
 from includeguard.ui.html_report import HTMLReportGenerator
 
 console = Console()
@@ -138,16 +141,47 @@ def analyze(project_path, output, json_output, dot_output, max_files, extensions
     # Generate project summary
     summary = estimator.generate_project_summary(reports)
     
+    # Step 4: Forward declaration analysis
+    console.print("[cyan]Analyzing forward declaration opportunities...[/cyan]")
+    fwd_detector = ForwardDeclarationDetector()
+    
+    all_fwd_opportunities = []
+    for analysis in analyses:
+        opportunities = fwd_detector.analyze_file(analysis.filepath, analysis)
+        if opportunities:
+            all_fwd_opportunities.extend([
+                {**opp, 'file': Path(analysis.filepath).name}
+                for opp in opportunities
+            ])
+    
+    # Step 5: PCH recommendations
+    console.print("[cyan]Generating PCH recommendations...[/cyan]")
+    pch_recommender = PCHRecommender()
+    pch_recommendations = pch_recommender.recommend_pch_headers(
+        analyses, graph, estimator, min_usage_count=3
+    )
+    
+    console.print(f"[green]✓[/green] Analysis complete\n")
+    
     # Display results
     _display_project_summary(summary)
     _display_top_opportunities(summary)
+    
+    if all_fwd_opportunities:
+        _display_forward_declaration_opportunities(all_fwd_opportunities[:10])
+    
+    if pch_recommendations:
+        _display_pch_recommendations(pch_recommendations[:10], pch_recommender)
+    
     _display_top_wasteful_files(reports[:10])
     
     # Export HTML report
     if output:
         console.print(f"\n[cyan]Generating HTML report...[/cyan]")
         html_gen = HTMLReportGenerator()
-        html_gen.generate(reports, summary, graph_stats, output)
+        html_gen.generate(reports, summary, graph_stats, output,
+                         forward_decls=all_fwd_opportunities,
+                         pch_recommendations=pch_recommendations)
         console.print(f"[green]✓[/green] HTML report saved to: [bold]{output}[/bold]")
     
     # Export JSON
@@ -289,6 +323,68 @@ def _display_top_wasteful_files(reports: list):
     
     console.print(table)
 
+def _display_forward_declaration_opportunities(opportunities: list):
+    """Display forward declaration suggestions"""
+    console.print("\n[bold green]💡 Forward Declaration Opportunities[/bold green]\n")
+    console.print("[dim]Replace expensive includes with forward declarations when only using pointers/references[/dim]\n")
+    
+    table = Table(box=box.SIMPLE)
+    table.add_column("File", style="cyan", no_wrap=True, max_width=25)
+    table.add_column("Replace Include", style="yellow", max_width=35)
+    table.add_column("With Forward Decl", style="green", max_width=30)
+    table.add_column("Confidence", justify="center")
+    
+    for opp in opportunities:
+        conf_color = "green" if opp['confidence'] > 0.7 else "yellow" if opp['confidence'] > 0.5 else "dim"
+        table.add_row(
+            opp['file'],
+            f"#include \"{opp['header']}\"",
+            opp['suggestion'],
+            f"[{conf_color}]{opp['confidence']:.0%}[/{conf_color}]"
+        )
+    
+    console.print(table)
+
+def _display_pch_recommendations(recommendations: list, pch_recommender: PCHRecommender):
+    """Display PCH recommendations"""
+    console.print("\n[bold magenta]🔧 Precompiled Header Recommendations[/bold magenta]\n")
+    console.print("[dim]Headers used frequently + expensive to compile → Good PCH candidates[/dim]\n")
+    
+    table = Table(box=box.ROUNDED)
+    table.add_column("Header", style="cyan")
+    table.add_column("Used By", justify="right")
+    table.add_column("Cost", justify="right")
+    table.add_column("PCH Score", justify="right", style="magenta")
+    table.add_column("Est. Savings", justify="right", style="green")
+    
+    for rec in recommendations:
+        score_color = "magenta bold" if rec['pch_score'] > 10000 else "magenta"
+        table.add_row(
+            rec['header'],
+            f"{rec['usage_count']} files",
+            f"{rec['cost']:.0f}",
+            f"[{score_color}]{rec['pch_score']:.0f}[/{score_color}]",
+            f"{rec['estimated_savings']:.0f}"
+        )
+    
+    console.print(table)
+    
+    # Show benefit estimate
+    benefit = pch_recommender.estimate_pch_benefit(recommendations)
+    console.print(f"\n[bold]Estimated speedup with PCH:[/bold] [green]{benefit['estimated_speedup']:.1f}%[/green] ")
+    console.print(f"[dim]({benefit['files_benefiting']} files would benefit)[/dim]")
+    
+    # Generate PCH file suggestion
+    console.print("\n[bold]Suggested PCH file (pch.h):[/bold]\n")
+    pch_content = pch_recommender.generate_pch_file_content(recommendations, max_headers=10)
+    syntax = Syntax(
+        pch_content,
+        "cpp",
+        theme="monokai",
+        line_numbers=False
+    )
+    console.print(syntax)
+
 @main.command()
 @click.argument('filepath', type=click.Path(exists=True))
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed analysis')
@@ -390,6 +486,107 @@ def inspect(filepath, verbose):
             )
     else:
         console.print("\\n[green]✓ No obvious optimization opportunities found![/green]")
-
+@main.command()
+@click.argument('filepath', type=click.Path(exists=True))
+@click.option('--compiler', default='g++', help='Compiler to use (g++, clang++, cl)')
+@click.option('--flags', '-f', multiple=True, help='Compiler flags (e.g., -std=c++17)')
+def profile(filepath, compiler, flags):
+    """Profile actual compilation time impact of headers"""
+    
+    print_banner()
+    
+    file_path = Path(filepath).resolve()
+    
+    console.print(f"\n[bold cyan]Profiling:[/bold cyan] {file_path.name}")
+    console.print(f"[yellow]This requires a C++ compiler ({compiler})[/yellow]\n")
+    
+    # Parse file
+    parser = IncludeParser(file_path.parent)
+    analysis = parser.parse_file(file_path)
+    
+    if not analysis or not analysis.includes:
+        console.print("[red]No includes found or file cannot be parsed[/red]")
+        return
+    
+    # Setup profiler
+    profiler = BuildProfiler(compiler)
+    compile_flags = list(flags) if flags else ['-std=c++17']
+    
+    console.print("[cyan]Measuring baseline compilation time...[/cyan]")
+    baseline = profiler.profile_file(str(file_path), compile_flags)
+    
+    if not baseline.success:
+        console.print(f"[red]Compilation failed:[/red] {baseline.error_message}")
+        console.print(f"[yellow]Check that the file compiles with:[/yellow]")
+        console.print(f"  {compiler} -E {file_path} {' '.join(compile_flags)}")
+        return
+    
+    console.print(f"[green]✓[/green] Baseline: {baseline.compilation_time_ms:.0f}ms "
+                 f"({baseline.preprocessed_lines:,} preprocessed lines)\n")
+    
+    # Profile each header
+    console.print("[cyan]Profiling individual headers (this may take a while)...[/cyan]\n")
+    
+    results = []
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                 console=console) as progress:
+        task = progress.add_task("Profiling headers...", total=len(analysis.includes))
+        
+        for inc in analysis.includes:
+            result = profiler.profile_with_and_without_header(
+                str(file_path),
+                inc.header,
+                compile_flags
+            )
+            results.append(result)
+            progress.advance(task)
+    
+    # Filter out errors and sort by savings
+    valid_results = [r for r in results if r.get('error') is None]
+    valid_results.sort(key=lambda r: r['savings_ms'], reverse=True)
+    
+    if not valid_results:
+        console.print("[red]Could not profile any headers successfully[/red]")
+        return
+    
+    # Display results
+    table = Table(title="Actual Build Impact Profile", box=box.ROUNDED)
+    table.add_column("Header", style="yellow", max_width=40)
+    table.add_column("Baseline", justify="right")
+    table.add_column("Without", justify="right")
+    table.add_column("Savings", justify="right", style="green")
+    table.add_column("Lines Saved", justify="right")
+    
+    for result in valid_results[:15]:
+        savings_pct = result['savings_pct']
+        if savings_pct > 10:
+            savings_color = "green bold"
+        elif savings_pct > 5:
+            savings_color = "green"
+        else:
+            savings_color = "dim"
+        
+        table.add_row(
+            result['header'],
+            f"{result['baseline_ms']:.0f}ms",
+            f"{result['without_header_ms']:.0f}ms",
+            f"[{savings_color}]{result['savings_ms']:.0f}ms ({result['savings_pct']:.1f}%)[/{savings_color}]",
+            f"{result['lines_saved']:,}"
+        )
+    
+    console.print(table)
+    
+    # Summary
+    total_savings = sum(r['savings_ms'] for r in valid_results)
+    total_savings_pct = (total_savings / baseline.compilation_time_ms * 100 
+                        if baseline.compilation_time_ms > 0 else 0)
+    
+    console.print(f"\n[bold]Total potential savings:[/bold] "
+                 f"[green]{total_savings:.0f}ms ({total_savings_pct:.1f}% of baseline)[/green]")
+    
+    # Show headers that broke compilation (likely necessary)
+    error_results = [r for r in results if r.get('error') is not None]
+    if error_results:
+        console.print(f"\n[dim]{len(error_results)} headers appear to be necessary (removal breaks compilation)[/dim]")
 if __name__ == '__main__':
     main()
