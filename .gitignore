@@ -3,8 +3,6 @@ venv/
 __pycache__/
 *.egg-info/
 .pytest_cache/
-*.html
-*.json
 build/
 dist/
 *.dot
@@ -13,3 +11,5 @@ dist/
 htmlcov/
 *.log
 .DS_Store
+sample_frontend/
+node_modules/

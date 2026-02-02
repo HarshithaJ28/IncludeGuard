@@ -4,3 +4,5 @@ networkx
 plotly
 pandas
 pydot
+flask>=2.0.0
+flask-cors>=3.0.0
