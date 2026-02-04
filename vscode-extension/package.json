@@ -4,7 +4,6 @@
   "description": "Real-time C++ include analysis with build cost estimates",
   "version": "0.1.0",
   "publisher": "includeguard",
-  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -20,6 +19,14 @@
     "build",
     "performance"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HarshithaJ28/IncludeGuard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HarshithaJ28/IncludeGuard/issues"
+  },
+  "homepage": "https://github.com/HarshithaJ28/IncludeGuard#readme",
   "activationEvents": [
     "onLanguage:cpp",
     "onLanguage:c"

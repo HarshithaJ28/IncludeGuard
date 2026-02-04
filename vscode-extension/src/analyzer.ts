@@ -96,11 +96,11 @@ export class IncludeGuardAnalyzer {
             }
             
             // Update status bar
-            const wasteP ct = result.summary.potential_savings_pct;
+            const wastePct = result.summary.potential_savings_pct;
             const wastedCost = result.summary.wasted_cost;
-            this.statusBarItem.text = `$(shield) IncludeGuard: ${wasteP ct.toFixed(1)}% waste (${wastedCost.toFixed(0)} units)`;
-            this.statusBarItem.tooltip = `Total cost: ${result.summary.total_cost.toFixed(0)} units\\nPotential savings: ${wasteP ct.toFixed(1)}%`;
-            this.statusBarItem.backgroundColor = wasteP ct > 30 ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
+            this.statusBarItem.text = `$(shield) IncludeGuard: ${wastePct.toFixed(1)}% waste (${wastedCost.toFixed(0)} units)`;
+            this.statusBarItem.tooltip = `Total cost: ${result.summary.total_cost.toFixed(0)} units\nPotential savings: ${wastePct.toFixed(1)}%`;
+            this.statusBarItem.backgroundColor = wastePct > 30 ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
 
         } catch (error: any) {
             this.outputChannel.appendLine(`Error: ${error.message}`);
