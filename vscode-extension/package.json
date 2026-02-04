@@ -1,0 +1,104 @@
+{
+  "name": "includeguard-vscode",
+  "displayName": "IncludeGuard",
+  "description": "Real-time C++ include analysis with build cost estimates",
+  "version": "0.1.0",
+  "publisher": "includeguard",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "c++",
+    "cpp",
+    "include",
+    "optimization",
+    "build",
+    "performance"
+  ],
+  "activationEvents": [
+    "onLanguage:cpp",
+    "onLanguage:c"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "includeguard.analyzeFile",
+        "title": "IncludeGuard: Analyze Current File"
+      },
+      {
+        "command": "includeguard.analyzeProject",
+        "title": "IncludeGuard: Analyze Entire Project"
+      },
+      {
+        "command": "includeguard.clearDiagnostics",
+        "title": "IncludeGuard: Clear Warnings"
+      },
+      {
+        "command": "includeguard.showReport",
+        "title": "IncludeGuard: Show HTML Report"
+      }
+    ],
+    "configuration": {
+      "title": "IncludeGuard",
+      "properties": {
+        "includeguard.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable (or 'python' if in PATH)"
+        },
+        "includeguard.analyzeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save"
+        },
+        "includeguard.analyzeOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files when opened"
+        },
+        "includeguard.costThreshold": {
+          "type": "number",
+          "default": 500,
+          "description": "Minimum cost to show warnings (units)"
+        },
+        "includeguard.showCostDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show cost estimates as inline decorations"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceLangId == cpp || resourceLangId == c",
+          "command": "includeguard.analyzeFile",
+          "group": "includeguard"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "18.x",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.2"
+  },
+  "dependencies": {}
+}

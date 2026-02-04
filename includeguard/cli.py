@@ -24,16 +24,25 @@ from includeguard.ui.html_report import HTMLReportGenerator
 console = Console()
 
 def print_banner():
-    """Print application banner"""
+    """Print application banner with gradient effect"""
     banner = """
     ___            __          __    ______                     __
    /  _/___  _____/ /_  ______/ /__ / ____/_  ______ __________/ /
-   / // __ \\/ ___/ / / / / __  / _ \\/ / __/ / / / __ `/ ___/ __  / 
+   / // __ \/ ___/ / / / / __  / _ \/ / __/ / / / __ `/ ___/ __  / 
  _/ // / / / /__/ / /_/ / /_/ /  __/ /_/ / /_/ / /_/ / /  / /_/ /  
-/___/_/ /_/\\___/_/\\__,_/\\__,_/\\___/\\____/\\__,_/\\__,_/_/   \\__,_/   
+/___/_/ /_/\___/_/\__,_/\__,_/\___/\____/\__,_/\__,_/_/   \__,_/   
     """
-    console.print(banner, style="cyan bold")
-    console.print("Fast C++ Include Analyzer with Build Cost Estimation\\n", style="dim")
+    from rich.console import Group
+    from rich.align import Align
+    
+    console.print("\n")
+    console.print(Align.center(banner), style="bold magenta")
+    console.print(Align.center(
+        "[bold cyan]⚡ Fast C++ Include Analyzer[/bold cyan] [dim]|[/dim] "
+        "[bold green]Build Cost Estimator[/bold green] [dim]|[/dim] "
+        "[bold yellow]v0.1.0[/bold yellow]"
+    ))
+    console.print(Align.center("[dim]🚀 Optimize your C++ build times instantly[/dim]\n"))
 
 @click.group()
 @click.version_option(version='0.1.0')
@@ -246,19 +255,48 @@ def _display_graph_stats(stats: dict, graph: DependencyGraph):
             console.print(f"  • {header_name}: [green]{count}[/green] times")
 
 def _display_project_summary(summary: dict):
-    """Display project cost summary"""
+    """Display project cost summary with enhanced styling"""
+    
+    # Calculate savings visually
+    waste_pct = summary['waste_percentage']
+    efficiency = 100 - waste_pct
+    
+    # Color code based on waste
+    if waste_pct < 10:
+        waste_color = "green"
+        status_emoji = "✨"
+        status = "Excellent"
+    elif waste_pct < 25:
+        waste_color = "yellow"
+        status_emoji = "✅"
+        status = "Good"
+    elif waste_pct < 50:
+        waste_color = "orange1"
+        status_emoji = "⚠️"
+        status = "Needs Optimization"
+    else:
+        waste_color = "red"
+        status_emoji = "🔥"
+        status = "Critical"
+    
     panel_content = f"""
-[bold]Total Cost:[/bold] {summary['total_cost']:,.0f} units
-[bold]Wasted Cost:[/bold] [red]{summary['total_waste']:,.0f}[/red] units ([red]{summary['waste_percentage']:.1f}%[/red])
-[bold]Potential Savings:[/bold] [green]{summary['waste_percentage']:.1f}%[/green] of build time
+[bold white on blue] 📊 BUILD COST ANALYSIS [/bold white on blue]
 
-[dim]Average cost per file: {summary['avg_cost_per_file']:.1f} units[/dim]
+💰 [bold]Total Build Cost:[/bold]     [cyan]{summary['total_cost']:>12,.0f}[/cyan] units
+🗑️  [bold]Wasted Cost:[/bold]        [{waste_color}]{summary['total_waste']:>12,.0f}[/{waste_color}] units ([{waste_color}]{waste_pct:.1f}%[/{waste_color}])
+📈 [bold]Potential Savings:[/bold]   [green]{waste_pct:>12.1f}%[/green] of build time
+⚡ [bold]Build Efficiency:[/bold]    [green]{efficiency:>12.1f}%[/green]
+
+{status_emoji}  [bold]Status:[/bold] [{waste_color}]{status}[/{waste_color}]
+[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]
+[dim]📁 Average cost per file: {summary['avg_cost_per_file']:.1f} units[/dim]
 """
     
+    console.print()
     console.print(Panel(
         panel_content,
-        title="[bold cyan]💰 Project Cost Summary[/bold cyan]",
-        border_style="cyan"
+        border_style="bright_cyan",
+        padding=(1, 2)
     ))
 
 def _display_top_opportunities(summary: dict):
