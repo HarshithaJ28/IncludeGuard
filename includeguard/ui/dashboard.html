@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IncludeGuard - C++ Header Analysis Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.18.0.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .animate-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <!-- Sidebar -->
+    <div id="sidebar" class="fixed left-0 top-0 h-full w-64 bg-gradient-to-b from-purple-600 to-purple-700 text-white shadow-2xl z-50">
+        <div class="p-6 border-b border-purple-500/30">
+            <h1 class="text-2xl font-bold">IncludeGuard</h1>
+            <p class="text-purple-200 text-sm mt-1">Header Analysis</p>
+        </div>
+        
+        <nav class="p-4 space-y-2">
+            <a href="#dashboard" onclick="showView('dashboard')" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/10 transition-all cursor-pointer bg-white/20">
+                <i class="fas fa-chart-line"></i>
+                <span class="font-medium">Dashboard</span>
+            </a>
+            <a href="#reports" onclick="showView('reports')" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/10 transition-all cursor-pointer">
+                <i class="fas fa-file-lines"></i>
+                <span class="font-medium">Reports</span>
+            </a>
+            <a href="#analyzer" onclick="showView('analyzer')" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/10 transition-all cursor-pointer">
+                <i class="fas fa-magnifying-glass"></i>
+                <span class="font-medium">Analyzer</span>
+            </a>
+            <a href="#settings" onclick="showView('settings')" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/10 transition-all cursor-pointer">
+                <i class="fas fa-gear"></i>
+                <span class="font-medium">Settings</span>
+            </a>
+        </nav>
+        
+        <div class="absolute bottom-6 left-4 right-4">
+            <button onclick="toggleTheme()" class="w-full bg-white/10 hover:bg-white/20 px-4 py-2.5 rounded-lg transition-all flex items-center justify-center gap-2">
+                <i class="fas fa-moon"></i>
+                <span class="text-sm font-medium">Toggle Dark Mode</span>
+            </button>
+            <p class="text-xs text-purple-200 mt-4 text-center">IncludeGuard v1.0</p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="ml-64">
+        <!-- Header -->
+        <header class="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-40">
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input 
+                        type="text" 
+                        placeholder="Search files or headers..." 
+                        class="pl-10 pr-4 py-1.5 bg-slate-100 rounded-lg text-sm outline-none focus:ring-2 focus:ring-purple-500 w-64 transition-all focus:w-80"
+                    />
+                </div>
+            </div>
+            <div class="flex items-center gap-6">
+                <button class="text-slate-500 hover:text-purple-500 relative transition-colors">
+                    <i class="fas fa-bell text-xl"></i>
+                    <span class="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
+                </button>
+                <div class="h-8 w-px bg-slate-200"></div>
+                <div class="flex items-center gap-3">
+                    <div class="text-right hidden sm:block">
+                        <p class="text-xs font-bold text-slate-800">Developer</p>
+                        <p class="text-[10px] text-purple-500 font-bold uppercase">Pro Account</p>
+                    </div>
+                    <img src="https://ui-avatars.com/api/?name=Dev&background=8b5cf6&color=fff" alt="Profile" class="w-9 h-9 rounded-full ring-2 ring-purple-500/20" />
+                </div>
+            </div>
+        </header>
+
+        <!-- Views Container -->
+        <div id="dashboard-view" class="p-8 space-y-8 animate-in">
+            <!-- Dashboard Header -->
+            <header class="flex justify-between items-end">
+                <div>
+                    <h2 class="text-3xl font-bold text-slate-800">Project Overview</h2>
+                    <p class="text-slate-500 mt-1">Status of headers and build optimization potential.</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs font-bold text-purple-600 uppercase tracking-wider">Last Scan</p>
+                    <p class="text-sm font-medium text-slate-600" id="last-scan-time">Loading...</p>
+                </div>
+            </header>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="p-3 bg-purple-50 rounded-xl text-purple-600">
+                            <i class="fas fa-folder-open text-xl"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-600">
+                            <i class="fas fa-arrow-up mr-1"></i>+4
+                        </span>
+                    </div>
+                    <p class="text-slate-500 text-sm font-medium">Total Files</p>
+                    <h3 class="text-2xl font-bold text-slate-800 mt-1" id="stat-total-files">0</h3>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="p-3 bg-purple-50 rounded-xl text-purple-600">
+                            <i class="fas fa-trash-can text-xl"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-1 rounded-full bg-rose-50 text-rose-600">
+                            <i class="fas fa-arrow-down mr-1"></i>-12%
+                        </span>
+                    </div>
+                    <p class="text-slate-500 text-sm font-medium">Bloat Headers</p>
+                    <h3 class="text-2xl font-bold text-slate-800 mt-1" id="stat-redundant">0</h3>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="p-3 bg-purple-50 rounded-xl text-purple-600">
+                            <i class="fas fa-link text-xl"></i>
+                        </div>
+                    </div>
+                    <p class="text-slate-500 text-sm font-medium">Avg Headers</p>
+                    <h3 class="text-2xl font-bold text-slate-800 mt-1" id="stat-avg-headers">0</h3>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="p-3 bg-purple-50 rounded-xl text-purple-600">
+                            <i class="fas fa-clock text-xl"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-600">
+                            <i class="fas fa-arrow-up mr-1"></i>+20s
+                        </span>
+                    </div>
+                    <p class="text-slate-500 text-sm font-medium">Est. Savings</p>
+                    <h3 class="text-2xl font-bold text-slate-800 mt-1" id="stat-savings">0%</h3>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <div class="flex justify-between items-center mb-8">
+                        <h4 class="font-bold text-slate-800">Cost Distribution</h4>
+                    </div>
+                    <div id="cost-chart" class="h-80 w-full"></div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <h4 class="font-bold text-slate-800 mb-8">Header Distribution</h4>
+                    <div id="header-pie-chart" class="h-64 w-full"></div>
+                </div>
+            </div>
+
+            <!-- Opportunities Table -->
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div class="p-6 border-b border-slate-100">
+                    <h4 class="font-bold text-slate-800">Top Optimization Opportunities</h4>
+                    <p class="text-slate-500 text-sm mt-1">Remove these unused includes to reduce build time</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">#</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">File</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Unused Header</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Est. Cost</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="opportunities-table" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="5" class="px-6 py-8 text-center text-slate-500">Loading data...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reports View (Hidden by default) -->
+        <div id="reports-view" class="p-8 hidden">
+            <h2 class="text-3xl font-bold text-slate-800 mb-6">Analysis Reports</h2>
+            <p class="text-slate-500">Detailed reports will be displayed here.</p>
+        </div>
+
+        <!-- Analyzer View (Hidden by default) -->
+        <div id="analyzer-view" class="p-8 hidden">
+            <h2 class="text-3xl font-bold text-slate-800 mb-6">Real-time Analyzer</h2>
+            <p class="text-slate-500">Analyzer interface will be displayed here.</p>
+        </div>
+
+        <!-- Settings View (Hidden by default) -->
+        <div id="settings-view" class="p-8 hidden">
+            <h2 class="text-3xl font-bold text-slate-800 mb-6">Settings</h2>
+            <div class="max-w-2xl bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                <h3 class="text-lg font-bold text-slate-800 mb-6">Scanner Configuration</h3>
+                <div class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-600 mb-2">Project Path</label>
+                        <input type="text" placeholder="/path/to/project" class="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-slate-800 focus:ring-2 focus:ring-purple-500 outline-none" />
+                    </div>
+                    <button class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-purple-500/20 hover:bg-purple-700 transition-all">Analyze Project</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // View Management
+        function showView(viewName) {
+            const views = ['dashboard', 'reports', 'analyzer', 'settings'];
+            views.forEach(v => {
+                const el = document.getElementById(v + '-view');
+                if (el) el.classList.add('hidden');
+            });
+            
+            const targetView = document.getElementById(viewName + '-view');
+            if (targetView) {
+                targetView.classList.remove('hidden');
+                targetView.classList.add('animate-in');
+            }
+            
+            // Update active nav item
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('bg-white/20');
+            });
+            event.target.closest('.nav-item').classList.add('bg-white/20');
+        }
+
+        // Theme Toggle
+        function toggleTheme() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        // Load Analysis Data
+        async function loadAnalysisData() {
+            try {
+                // For demo, using mock data. In production, fetch from API
+                const response = await fetch('/api/latest').catch(() => null);
+                
+                if (response && response.ok) {
+                    const data = await response.json();
+                    updateDashboard(data);
+                } else {
+                    // Use mock data
+                    useMockData();
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+                useMockData();
+            }
+        }
+
+        function useMockData() {
+            const now = new Date();
+            document.getElementById('last-scan-time').textContent = now.toLocaleString();
+            document.getElementById('stat-total-files').textContent = '6';
+            document.getElementById('stat-redundant').textContent = '7';
+            document.getElementById('stat-avg-headers').textContent = '3.5';
+            document.getElementById('stat-savings').textContent = '34.4%';
+            
+            // Mock opportunities
+            const tbody = document.getElementById('opportunities-table');
+            const mockOps = [
+                { file: 'database_client.cpp', header: 'iostream', cost: 1500 },
+                { file: 'utils.h', header: 'iostream', cost: 1500 },
+                { file: 'database_client.cpp', header: 'algorithm', cost: 1200 },
+                { file: 'service.cpp', header: 'algorithm', cost: 1200 },
+                { file: 'main.cpp', header: 'map', cost: 900 },
+            ];
+            
+            tbody.innerHTML = mockOps.map((op, i) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-6 py-4 text-sm text-slate-500">${i + 1}</td>
+                    <td class="px-6 py-4 text-sm font-mono text-purple-600">${op.file}</td>
+                    <td class="px-6 py-4 text-sm font-mono text-slate-700">${op.header}</td>
+                    <td class="px-6 py-4 text-sm font-bold ${op.cost > 1000 ? 'text-rose-600' : 'text-amber-600'}">${op.cost}</td>
+                    <td class="px-6 py-4"><span class="px-3 py-1 bg-rose-100 text-rose-600 text-xs font-semibold rounded-full">Remove</span></td>
+                </tr>
+            `).join('');
+            
+            // Create charts
+            createCostChart();
+            createPieChart();
+        }
+
+        function createCostChart() {
+            const data = [{
+                x: ['main.cpp', 'service.cpp', 'processor.cpp', 'utils.h', 'database_client.cpp'],
+                y: [5100, 4200, 3560, 3000, 3121],
+                type: 'bar',
+                marker: {
+                    color: '#8b5cf6',
+                    line: { color: '#7c3aed', width: 1 }
+                }
+            }];
+            
+            const layout = {
+                margin: { t: 20, b: 60, l: 60, r: 20 },
+                xaxis: { tickangle: -45 },
+                yaxis: { title: 'Cost (units)' },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { family: 'Inter' }
+            };
+            
+            Plotly.newPlot('cost-chart', data, layout, { responsive: true, displayModeBar: false });
+        }
+
+        function createPieChart() {
+            const data = [{
+                values: [487, 312, 289, 112],
+                labels: ['System', 'Third-party', 'Internal', 'Other'],
+                type: 'pie',
+                hole: 0.5,
+                marker: {
+                    colors: ['#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe']
+                },
+                textinfo: 'label+percent',
+                textposition: 'outside'
+            }];
+            
+            const layout = {
+                margin: { t: 0, b: 0, l: 0, r: 0 },
+                showlegend: false,
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                font: { family: 'Inter', size: 11 }
+            };
+            
+            Plotly.newPlot('header-pie-chart', data, layout, { responsive: true, displayModeBar: false });
+        }
+
+        function updateDashboard(data) {
+            if (!data || !data.summary) return;
+            
+            const summary = data.summary;
+            document.getElementById('stat-total-files').textContent = summary.total_files;
+            document.getElementById('stat-redundant').textContent = summary.top_opportunities.length;
+            document.getElementById('stat-avg-headers').textContent = (summary.total_includes / summary.total_files).toFixed(1);
+            document.getElementById('stat-savings').textContent = summary.waste_percentage.toFixed(1) + '%';
+            
+            // Update opportunities table
+            const tbody = document.getElementById('opportunities-table');
+            tbody.innerHTML = summary.top_opportunities.slice(0, 10).map((op, i) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-6 py-4 text-sm text-slate-500">${i + 1}</td>
+                    <td class="px-6 py-4 text-sm font-mono text-purple-600">${op.file}</td>
+                    <td class="px-6 py-4 text-sm font-mono text-slate-700">${op.header}</td>
+                    <td class="px-6 py-4 text-sm font-bold ${op.cost > 1000 ? 'text-rose-600' : 'text-amber-600'}">${op.cost}</td>
+                    <td class="px-6 py-4"><span class="px-3 py-1 bg-rose-100 text-rose-600 text-xs font-semibold rounded-full">Remove</span></td>
+                </tr>
+            `).join('');
+            
+            createCostChart();
+            createPieChart();
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadAnalysisData();
+        });
+    </script>
+</body>
+</html>

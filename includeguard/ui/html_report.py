@@ -846,9 +846,11 @@ class HTMLReportGenerator:
             createWasteChart();
         }}
         
-        // Initial chart creation
-        createCostChart();
-        createWasteChart();
+        // Initial chart creation - wait for DOM to be ready
+        window.addEventListener('DOMContentLoaded', function() {{
+            createCostChart();
+            createWasteChart();
+        }});
     </script>
 </body>
 </html>

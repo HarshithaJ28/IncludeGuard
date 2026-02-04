@@ -588,5 +588,183 @@ def profile(filepath, compiler, flags):
     error_results = [r for r in results if r.get('error') is not None]
     if error_results:
         console.print(f"\n[dim]{len(error_results)} headers appear to be necessary (removal breaks compilation)[/dim]")
+
+@main.command('ci-comment')
+@click.argument('analysis_json', type=click.Path(exists=True))
+@click.option('--output', '-o', default='pr_comment.md', 
+              help='Output markdown file for PR comment')
+@click.option('--fail-on-threshold/--no-fail', default=False, 
+              help='Exit with error code if quality thresholds exceeded')
+def ci_comment(analysis_json, output, fail_on_threshold):
+    """Generate CI/CD comment from analysis JSON for pull requests"""
+    
+    from includeguard.ci.github_action import generate_pr_comment, check_thresholds
+    
+    # Read analysis results
+    with open(analysis_json) as f:
+        analysis_data = json.load(f)
+    
+    # Generate PR comment
+    comment = generate_pr_comment(analysis_data)
+    
+    # Write to file with UTF-8 encoding
+    Path(output).write_text(comment, encoding='utf-8')
+    
+    console.print(f"[green]✓[/green] Generated PR comment: {output}")
+    console.print("\n" + "="*80 + "\n")
+    console.print(comment)
+    console.print("\n" + "="*80 + "\n")
+    
+    # Check quality thresholds
+    if fail_on_threshold:
+        passing, messages = check_thresholds(analysis_data)
+        
+        console.print("[bold]Threshold Check Results:[/bold]")
+        for msg in messages:
+            if "FAIL" in msg:
+                console.print(f"[red]{msg}[/red]")
+            else:
+                console.print(f"[green]{msg}[/green]")
+        
+        if not passing:
+            console.print("\n[red]❌ Quality thresholds exceeded - failing build[/red]")
+            sys.exit(1)
+        else:
+            console.print("\n[green]✅ All thresholds passed[/green]")
+    
+    console.print("[green]✅ CI comment generation complete[/green]")
+
+@main.command('fix-generate')
+@click.argument('project_path', type=click.Path(exists=True))
+@click.option('--output', '-o', default='includeguard_fixes.patch',
+              help='Output patch file')
+@click.option('--min-confidence', default=0.7, type=float,
+              help='Minimum confidence for auto-fix (0-1, default: 0.7)')
+@click.option('--json-input', '-j', type=click.Path(exists=True),
+              help='Use existing JSON analysis instead of re-analyzing')
+def fix_generate(project_path, output, min_confidence, json_input):
+    """Generate Git patch to automatically fix include issues"""
+    
+    print_banner()
+    
+    console.print(f"[cyan]Generating auto-fix patch for:[/cyan] {project_path}")
+    console.print(f"[cyan]Minimum confidence:[/cyan] {min_confidence:.0%}\n")
+    
+    # Either load existing analysis or run new analysis
+    if json_input:
+        console.print(f"[dim]Loading analysis from {json_input}...[/dim]")
+        with open(json_input) as f:
+            analysis_data = json.load(f)
+        
+        reports = analysis_data.get('reports', [])
+        fwd_opportunities = analysis_data.get('forward_declarations', [])
+    else:
+        # Run full analysis
+        console.print("[dim]Running analysis...[/dim]")
+        
+        project_path_obj = Path(project_path)
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task("Analyzing project...", total=None)
+            
+            # Parse project
+            parser = IncludeParser(project_root=project_path_obj)
+            analyses = parser.parse_project()
+            
+            progress.update(task, description="Building dependency graph...")
+            graph = DependencyGraph()
+            graph.build(analyses)
+            
+            progress.update(task, description="Estimating costs...")
+            estimator = CostEstimator(graph)
+            
+            # Build reports for each file
+            all_analyses = {a.filepath: a for a in analyses}
+            reports = []
+            for analysis in analyses:
+                cost_results = estimator.analyze_file_costs(analysis, all_analyses)
+                total_cost = sum(c['estimated_cost'] for c in cost_results)
+                
+                report = {
+                    'file': analysis.filepath,
+                    'optimization_opportunities': cost_results,
+                    'total_estimated_cost': total_cost,
+                    'total_includes': len(analysis.includes)
+                }
+                reports.append(report)
+            
+            progress.update(task, description="Finding forward declaration opportunities...")
+            fwd_detector = ForwardDeclarationDetector()
+            fwd_opportunities = []
+            for analysis in analyses:
+                try:
+                    opportunities = fwd_detector.analyze_file(str(analysis.filepath), analysis)
+                    fwd_opportunities.extend(opportunities)
+                except Exception as e:
+                    console.print(f"[dim]Warning: Could not analyze {analysis.filepath}: {e}[/dim]")
+            
+            progress.update(task, description="Complete!", completed=True)
+        
+        console.print(f"[green]✓[/green] Analyzed {len(analyses)} files\n")
+    
+    # Generate patch
+    from includeguard.fixer.patch_generator import PatchGenerator
+    
+    generator = PatchGenerator(min_confidence=min_confidence)
+    
+    console.print("[cyan]Generating patch...[/cyan]")
+    
+    try:
+        num_files = generator.generate_patch(reports, fwd_opportunities, output)
+        stats = generator.get_stats()
+        
+        if num_files == 0:
+            console.print("\n[yellow]⚠️  No fixes to apply![/yellow]")
+            console.print("[dim]Either no issues found or confidence threshold too high[/dim]")
+            return
+        
+        console.print(f"\n[green]✓[/green] Generated patch: {output}")
+        console.print(f"[cyan]Files modified:[/cyan] {num_files}")
+        console.print(f"[cyan]Fixes applied:[/cyan] {stats['fixes_applied']}\n")
+        
+        # Show how to apply
+        panel_content = f"""[bold green]Patch generated successfully![/bold green]
+
+[bold]To apply fixes:[/bold]
+  git apply {output}
+
+[bold]To review before applying:[/bold]
+  git apply --check {output}
+  cat {output}
+
+[yellow]⚠️  Always review changes before committing![/yellow]"""
+        
+        console.print(Panel(panel_content, title="✅ Auto-Fix Ready", border_style="green"))
+        
+        # Summary of what was fixed
+        console.print("\n[bold]Summary of fixes:[/bold]")
+        
+        unused_removed = sum(1 for r in reports 
+                            for opp in r.get('optimization_opportunities', [])
+                            if not opp.get('likely_used', True) and opp.get('cost', 0) > 500)
+        
+        fwd_added = sum(1 for fwd in fwd_opportunities 
+                       if fwd.get('confidence', 0) >= min_confidence)
+        
+        if unused_removed > 0:
+            console.print(f"  • Removed [red]{unused_removed}[/red] unused includes")
+        if fwd_added > 0:
+            console.print(f"  • Added [blue]{fwd_added}[/blue] forward declarations")
+        
+    except Exception as e:
+        console.print(f"\n[red]❌ Error generating patch:[/red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        sys.exit(1)
+
 if __name__ == '__main__':
     main()

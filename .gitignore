@@ -13,3 +13,22 @@ htmlcov/
 .DS_Store
 sample_frontend/
 node_modules/
+
+# VS Code extension build artifacts
+vscode-extension/out/
+vscode-extension/node_modules/
+*.vsix
+.vscode-test/
+
+# Temporary test files
+test_fixes.patch
+test.json
+pr_comment.md
+
+# Documentation files (exclude all .md except README.md)
+*.md
+!README.md
+
+# Analysis output files
+*_analysis.json
+*_report.html

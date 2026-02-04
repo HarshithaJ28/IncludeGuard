@@ -243,47 +243,50 @@ class CostEstimator:
         patterns_found = 0
         total_patterns = 0
         
-        # Pattern 1: Direct name usage
+        # Pattern 1: Direct name usage (with word boundaries)
         total_patterns += 1
-        if base_name.lower() in content.lower():
+        if re.search(rf'\b{re.escape(base_name)}\b', content, re.IGNORECASE):
             patterns_found += 1
         
-        # Pattern 2: Namespace usage (for system headers)
-        total_patterns += 1
-        if header.startswith('<'):
-            std_usage = re.search(r'\bstd::', content)
-            if std_usage:
-                patterns_found += 1
-        
-        # Pattern 3: Check for common symbols from header
+        # Pattern 2: Check for common symbols from header
         total_patterns += 1
         if self._check_symbol_usage(header, content):
             patterns_found += 1
         
-        # Calculate confidence
+        # Calculate confidence (now 2 patterns total)
         confidence = patterns_found / total_patterns
         is_likely_used = confidence > 0.3
         
         return (is_likely_used, confidence)
     
     def _check_symbol_usage(self, header: str, content: str) -> bool:
-        """Check for usage of common symbols from header"""
+        """Check for usage of common symbols from header (with word boundaries)"""
         # Define common symbols for known headers
+        # NOTE: Don't include the type names themselves (vector, map, etc) since they're
+        # already covered by the name matching pattern
         header_symbols = {
-            'iostream': ['cout', 'cin', 'endl', 'cerr'],
-            'vector': ['vector', 'push_back', 'emplace_back'],
-            'string': ['string', 'to_string'],
-            'map': ['map', 'unordered_map'],
-            'algorithm': ['sort', 'find', 'transform', 'for_each'],
+            'iostream': ['cout', 'cin', 'endl', 'cerr', 'clog'],
+            'vector': ['push_back', 'emplace_back', 'pop_back', 'resize', 'reserve'],
+            'string': ['to_string', 'getline', 'substr', 'append'],
+            'map': ['unordered_map', 'multimap', 'emplace', 'insert', 'find', 'erase'],
+            'algorithm': ['sort', 'find', 'transform', 'for_each', 'count', 'copy'],
             'memory': ['make_shared', 'make_unique', 'shared_ptr', 'unique_ptr'],
-            'thread': ['thread', 'join', 'detach'],
-            'mutex': ['mutex', 'lock_guard', 'unique_lock'],
+            'thread': ['join', 'detach', 'joinable'],
+            'mutex': ['lock_guard', 'unique_lock', 'scoped_lock'],
+            'fstream': ['ifstream', 'ofstream', 'fstream'],
+            'sstream': ['stringstream', 'istringstream', 'ostringstream'],
         }
         
+        # Extract base name from header (e.g., "iostream" from "<iostream>" or "iostream")
+        header_base = Path(header.strip('<>\"')).stem
+        
         # Get symbols for this header
-        for header_pattern, symbols in header_symbols.items():
-            if header_pattern in header:
-                return any(symbol in content for symbol in symbols)
+        if header_base in header_symbols:
+            symbols = header_symbols[header_base]
+            # Use word boundaries for accurate detection
+            for symbol in symbols:
+                if re.search(rf'\b{re.escape(symbol)}\b', content):
+                    return True
         
         return False
     

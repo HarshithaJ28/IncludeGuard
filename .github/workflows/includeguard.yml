@@ -1,0 +1,88 @@
+name: IncludeGuard Analysis
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.cpp'
+      - '**.hpp'
+      - '**.h'
+      - '**.cc'
+      - '**.cxx'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Full history for comparison
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install IncludeGuard
+      run: |
+        pip install -e .
+        # Or for published version: pip install includeguard
+    
+    - name: Get changed C++ files
+      id: changed-files
+      uses: tj-actions/changed-files@v40
+      with:
+        files: |
+          **/*.cpp
+          **/*.hpp
+          **/*.h
+          **/*.cc
+          **/*.cxx
+    
+    - name: Analyze changed files
+      if: steps.changed-files.outputs.any_changed == 'true'
+      run: |
+        echo "Changed files: ${{ steps.changed-files.outputs.all_changed_files }}"
+        
+        # Analyze the project
+        includeguard analyze . \
+          --json-output analysis-results.json \
+          --max-files 1000 \
+          --output report.html
+    
+    - name: Generate PR Comment
+      if: steps.changed-files.outputs.any_changed == 'true'
+      id: pr-comment
+      run: |
+        # Generate comment from analysis
+        includeguard ci-comment analysis-results.json \
+          --output pr_comment.md \
+          --fail-on-threshold
+    
+    - name: Post PR Comment
+      if: steps.changed-files.outputs.any_changed == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const comment = fs.readFileSync('pr_comment.md', 'utf8');
+          
+          // Post comment
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+    
+    - name: Upload analysis artifact
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: includeguard-analysis
+        path: |
+          analysis-results.json
+          report.html
+          pr_comment.md
