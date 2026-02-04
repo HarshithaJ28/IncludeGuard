@@ -388,10 +388,12 @@ def _display_pch_recommendations(recommendations: list, pch_recommender: PCHReco
 @main.command()
 @click.argument('filepath', type=click.Path(exists=True))
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed analysis')
-def inspect(filepath, verbose):
+@click.option('--json', '-j', is_flag=True, help='Output JSON for programmatic use')
+def inspect(filepath, verbose, json):
     """Inspect a single file's includes"""
     
-    print_banner()
+    if not json:
+        print_banner()
     
     file_path = Path(filepath).resolve()
     
@@ -486,6 +488,33 @@ def inspect(filepath, verbose):
             )
     else:
         console.print("\\n[green]✓ No obvious optimization opportunities found![/green]")
+    
+    # JSON output for programmatic use (e.g., VS Code extension)
+    if json:
+        import sys
+        json_output = {
+            'file': str(file_path),
+            'includes': [
+                {
+                    'header': inc.header,
+                    'line': inc.line_number,
+                    'is_system': inc.is_system,
+                    'cost': report['include_costs'].get(inc.header, {}).get('estimated_cost', 0),
+                    'likely_used': report['include_costs'].get(inc.header, {}).get('likely_used', True),
+                    'confidence': report['include_costs'].get(inc.header, {}).get('confidence', 0.0)
+                }
+                for inc in analysis.includes
+            ],
+            'summary': {
+                'total_cost': report['total_estimated_cost'],
+                'wasted_cost': report['wasted_cost'],
+                'potential_savings_pct': report['potential_savings_pct']
+            },
+            'optimization_opportunities': report['optimization_opportunities']
+        }
+        console.print(json.dumps(json_output, indent=2))
+        sys.exit(0)
+
 @main.command()
 @click.argument('filepath', type=click.Path(exists=True))
 @click.option('--compiler', default='g++', help='Compiler to use (g++, clang++, cl)')
