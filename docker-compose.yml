@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # CLI service for command-line analysis
+  includeguard-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: includeguard:latest
+    volumes:
+      - ./projects:/workspace:ro
+      - ./results:/output:rw
+    working_dir: /workspace
+    environment:
+      PYTHONUNBUFFERED: 1
+    command: analyze . --report json --output /output/analysis.json
+
+  # Server service for REST API
+  includeguard-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: includeguard:latest
+    container_name: includeguard-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./projects:/workspace
+      - ./cache:/cache
+    environment:
+      PYTHONUNBUFFERED: 1
+      INCLUDEGUARD_CACHE_DIR: /cache
+      INCLUDEGUARD_WORKERS: 4
+    command: server --port 8000 --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Testing service
+  includeguard-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: includeguard:latest
+    volumes:
+      - .:/app
+      - /app/.venv
+    working_dir: /app
+    environment:
+      PYTHONUNBUFFERED: 1
+    command: pytest -v --cov=includeguard --cov-report=term-missing
+
+volumes:
+  cache:
+    driver: local

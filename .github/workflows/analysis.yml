@@ -1,0 +1,113 @@
+name: Code Analysis & Docs
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # SonarQube code analysis
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Shallow clones should be disabled
+    
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Generate documentation
+  docs:
+    name: Build & Deploy Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints -e .
+    
+    - name: Build documentation
+      run: |
+        cd docs
+        make html || echo "Documentation build skipped (no Makefile)"
+        cd ..
+    
+    - name: Deploy documentation
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/_build/html
+
+  # Check dependencies for vulnerabilities
+  dependency-check:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-audit
+    
+    - name: Audit dependencies
+      run: |
+        pip-audit || true
+
+  # Generate metrics
+  metrics:
+    name: Generate Project Metrics
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pylint radon coverage -e .
+    
+    - name: Generate complexity metrics
+      run: |
+        radon cc includeguard -a > complexity.txt || true
+        radon mi includeguard > maintainability.txt || true
+    
+    - name: Generate coverage metrics
+      run: |
+        pytest tests/ --cov=includeguard --cov-report=term > coverage.txt || true
+    
+    - name: Upload metrics
+      uses: actions/upload-artifact@v3
+      with:
+        name: project-metrics
+        path: |
+          complexity.txt
+          maintainability.txt
+          coverage.txt

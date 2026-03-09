@@ -1,4 +1,99 @@
+# Virtual environments
 venv/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pyproject.toml
+
+# Testing & Coverage
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.benchmarks/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.project
+.pydevproject
+
+# Project specific
+results/
+projects/
+cache/
+analysis_results/
+*.html
+!docs/_build/html
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+site/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+.pytest_cache
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# CI/CD
+.github/workflows/artifacts/
+
+# Environment files
+.env
+.env.local
+*.pem
+*.key
+
+# OS specific
+.DS_Store
+Thumbs.db
+.directory
+
+# Benchmark data
+.benchmarks/
+benchmarks-*.json
 *.pyc
 __pycache__/
 *.egg-info/

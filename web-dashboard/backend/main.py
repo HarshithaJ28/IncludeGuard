@@ -32,6 +32,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "*"  # In production, specify your frontend domain
     ],
     allow_credentials=True,
@@ -41,6 +43,73 @@ app.add_middleware(
 
 # In-memory storage for analysis jobs (use Redis in production)
 analysis_jobs = {}
+
+
+def append_log(job_id: str, message: str, stream: str = "info") -> None:
+    """
+    Append a line of output to the in-memory terminal log for a job.
+
+    The frontend terminal consumes these via the existing WebSocket job payloads.
+    """
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    job = analysis_jobs.setdefault(job_id, {})
+    logs = job.setdefault("logs", [])
+    logs.append(
+        {
+            "timestamp": timestamp,
+            "stream": stream,
+            "message": message,
+        }
+    )
+
+def build_file_tree(directory: Path, max_depth: int = 5, current_depth: int = 0) -> List[dict]:
+    """
+    Recursively build a file tree structure from a directory.
+    Returns a list of file/folder nodes with children.
+    
+    Args:
+        directory: Root directory to scan
+        max_depth: Maximum recursion depth
+        current_depth: Current recursion depth
+    
+    Returns:
+        List of file/folder nodes
+    """
+    if current_depth >= max_depth:
+        return []
+    
+    nodes = []
+    try:
+        # Get all items in the directory
+        items = sorted(directory.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        
+        for item in items:
+            # Skip common unneeded directories
+            if item.is_dir():
+                if item.name in ['.git', '.github', '__pycache__', '.venv', 'venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.idea']:
+                    continue
+                
+                node = {
+                    "name": item.name,
+                    "type": "folder",
+                    "isOpen": current_depth < 2,  # Auto-expand first 2 levels
+                    "children": build_file_tree(item, max_depth, current_depth + 1)
+                }
+            else:
+                # Only include relevant file types
+                if item.suffix in ['.cpp', '.h', '.hpp', '.c', '.cc', '.cxx', '.txt', '.md', '.cmake', '.py', '.json', '.yaml', '.yml', '.xml']:
+                    node = {
+                        "name": item.name,
+                        "type": "file"
+                    }
+                else:
+                    continue
+            
+            nodes.append(node)
+    except PermissionError:
+        pass
+    
+    return nodes
 
 # Temporary directory for uploads
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "includeguard_uploads"
@@ -115,6 +184,9 @@ async def analyze_upload(
             "created_at": datetime.now().isoformat(),
             "project_path": str(analyze_path)
         }
+
+        append_log(job_id, f"Received upload: {file.filename}", "info")
+        append_log(job_id, f"Preparing analysis for project at {analyze_path}", "info")
         
         # Start analysis in background
         background_tasks.add_task(run_analysis, job_id, analyze_path)
@@ -154,6 +226,8 @@ async def analyze_github(
             "created_at": datetime.now().isoformat(),
             "repo_url": str(request.repo_url)
         }
+
+        append_log(job_id, f"Cloning repository from {request.repo_url}...", "info")
         
         # Start cloning and analysis in background
         background_tasks.add_task(clone_and_analyze, job_id, str(request.repo_url), job_dir)
@@ -192,6 +266,51 @@ async def get_report(job_id: str):
     
     return FileResponse(report_path, media_type="text/html", filename=f"analysis_{job_id}.html")
 
+@app.get("/api/file/{job_id}")
+async def get_file(job_id: str, path: str):
+    """Get content of a file from the analyzed project"""
+    if job_id not in analysis_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = analysis_jobs[job_id]
+    project_path = job.get("project_path")
+    if not project_path:
+        raise HTTPException(status_code=400, detail="Project path not available")
+    
+    # Normalize path separators (handle both / and \)
+    normalized_path = path.replace('\\', '/')
+    path_parts = normalized_path.split('/')
+    
+    # Prevent path traversal attacks
+    project_root = Path(project_path)
+    # Use joinpath to handle path separators correctly on all platforms
+    file_path = project_root.joinpath(*path_parts).resolve()
+    
+    # Ensure the file is within the project directory
+    try:
+        file_path.relative_to(project_root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path outside project")
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+    
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+    
+    try:
+        # Read the file content
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        return {
+            "file": str(path),
+            "content": content,
+            "size": len(content),
+            "encoding": "utf-8"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
 @app.websocket("/ws/{job_id}")
 async def websocket_endpoint(websocket: WebSocket, job_id: str):
     """
@@ -229,15 +348,21 @@ async def clone_and_analyze(job_id: str, repo_url: str, job_dir: Path):
         analysis_jobs[job_id]["status"] = "cloning"
         analysis_jobs[job_id]["progress"] = 10
         analysis_jobs[job_id]["message"] = "Cloning repository..."
+
+        append_log(job_id, f"Cloning repository from {repo_url}...", "info")
         
         # Clone repo (shallow clone for speed)
         repo_path = job_dir / "repo"
         git.Repo.clone_from(repo_url, repo_path, depth=1)
+
+        append_log(job_id, f"Repository cloned to {repo_path}", "info")
         
         # Update project path and start analysis
         analysis_jobs[job_id]["project_path"] = str(repo_path)
         analysis_jobs[job_id]["progress"] = 20
         analysis_jobs[job_id]["message"] = "Repository cloned, starting analysis..."
+
+        append_log(job_id, "Repository cloned successfully. Starting IncludeGuard analysis...", "info")
         
         await run_analysis(job_id, repo_path)
         
@@ -245,6 +370,7 @@ async def clone_and_analyze(job_id: str, repo_url: str, job_dir: Path):
         analysis_jobs[job_id]["status"] = "failed"
         analysis_jobs[job_id]["message"] = f"Clone failed: {str(e)}"
         print(f"Clone error for job {job_id}: {e}")
+        append_log(job_id, f"ERROR: Clone failed - {e}", "stderr")
 
 async def run_analysis(job_id: str, project_path: Path):
     """Run IncludeGuard CLI analysis on project"""
@@ -253,6 +379,8 @@ async def run_analysis(job_id: str, project_path: Path):
         analysis_jobs[job_id]["status"] = "running"
         analysis_jobs[job_id]["progress"] = 30
         analysis_jobs[job_id]["message"] = "Scanning C++ files..."
+
+        append_log(job_id, f"Scanning C++ project at {project_path}", "info")
         
         # Output paths
         json_output = UPLOAD_DIR / job_id / "result.json"
@@ -264,6 +392,9 @@ async def run_analysis(job_id: str, project_path: Path):
             "analyze", str(project_path),
             "--output", str(html_output)
         ]
+
+        append_log(job_id, "Starting IncludeGuard CLI analysis...", "info")
+        append_log(job_id, f"$ {' '.join(cmd)}", "stdout")
         
         # Set environment to handle Unicode properly
         env = os.environ.copy()
@@ -277,15 +408,37 @@ async def run_analysis(job_id: str, project_path: Path):
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
             env=env
         )
-        
-        # Update progress while running
+
+        # Stream output line-by-line to logs while the process runs
+        async def stream_output(stream, stream_name: str) -> str:
+            if stream is None:
+                return ""
+            collected_lines: List[str] = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if not text:
+                    continue
+                collected_lines.append(text)
+                append_log(job_id, text, stream_name)
+            return "\n".join(collected_lines)
+
         analysis_jobs[job_id]["progress"] = 50
         analysis_jobs[job_id]["message"] = "Building dependency graph..."
-        
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode != 0:
-            raise Exception(f"Analysis failed: {stderr.decode()}")
+
+        stdout_text, stderr_text = await asyncio.gather(
+            stream_output(process.stdout, "stdout"),
+            stream_output(process.stderr, "stderr"),
+        )
+
+        returncode = await process.wait()
+
+        if returncode != 0:
+            error_message = stderr_text or "Unknown analysis error"
+            append_log(job_id, f"ERROR: {error_message}", "stderr")
+            raise Exception(f"Analysis failed: {error_message}")
         
         # Parse HTML report to extract summary data
         analysis_jobs[job_id]["progress"] = 90
@@ -296,20 +449,32 @@ async def run_analysis(job_id: str, project_path: Path):
             html_content = f.read()
         
         # Extract key metrics from CLI output and HTML report
-        output_text = stdout.decode()
+        # Combine stdout and stderr so we have full context for parsing
+        combined_output = stdout_text
+        if stderr_text:
+            combined_output = f"{combined_output}\n{stderr_text}" if combined_output else stderr_text
+        output_text = combined_output
         result = parse_analysis_output(output_text, html_output)
+        
+        # Build file tree from analyzed project
+        append_log(job_id, "Scanning project file structure...", "info")
+        file_tree = build_file_tree(project_path)
+        result["file_tree"] = file_tree
         
         # Mark as completed
         analysis_jobs[job_id]["status"] = "completed"
         analysis_jobs[job_id]["progress"] = 100
         analysis_jobs[job_id]["message"] = "Analysis complete!"
         analysis_jobs[job_id]["result"] = result
+        analysis_jobs[job_id]["project_path"] = str(project_path)  # Store path for file content retrieval
         analysis_jobs[job_id]["completed_at"] = datetime.now().isoformat()
+        append_log(job_id, "Analysis complete! Preparing final report...", "info")
         
     except Exception as e:
         analysis_jobs[job_id]["status"] = "failed"
         analysis_jobs[job_id]["message"] = f"Analysis failed: {str(e)}"
         print(f"Analysis error for job {job_id}: {e}")
+        append_log(job_id, f"ERROR: Analysis failed - {e}", "stderr")
 
 def parse_analysis_output(output: str, html_path: Path = None) -> dict:
     """Parse CLI output and HTML report to extract key metrics"""
