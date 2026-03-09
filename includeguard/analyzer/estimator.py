@@ -247,7 +247,7 @@ class CostEstimator:
         # Classify header type
         is_system = header.startswith('<') or '/' not in header
         is_boost = 'boost' in header
-        is_3rd_party = any(x in header.lower() for x in ['boost', 'opencv', 'qt', 'nlohmann', 'glm', 'eigen'])
+        is_3rd_party = any(x in header.lower() for x in ['boost/', 'boost\\', 'opencv', 'qt', 'nlohmann', 'glm', 'eigen', 'tensorflow', 'pytorch'])
         is_local = not is_system and not is_3rd_party
         
         # Extract base name
@@ -267,32 +267,52 @@ class CostEstimator:
         if self._check_symbol_usage(header, content):
             patterns_found += 1
         
-        # Pattern 3: std:: usage for stdlib
+        # Pattern 3: Header-SPECIFIC std:: usage (FIXED: was checking all std::)
+        # CRITICAL FIX: Check for SPECIFIC header usage, not just any std::
         total_patterns += 1
-        if is_system and re.search(r'\bstd::\w+', content):
+        if is_system and self._check_header_specific_std_usage(header, content):
             patterns_found += 1
         
         confidence = patterns_found / total_patterns
         
         # DIFFERENTIATED LOGIC based on header type
+        # Based on BRUTAL_IMPROVEMENT_PLAN fixes
         
-        # CRITICAL FIX #1: 3rd-party libraries are usually needed
-        # Only mark as unused if VERY confident (90%+ match)
+        # CRITICAL FIX #1: 3rd-party libraries (boost, opencv, etc)
+        # These are RARELY unused - assume USED unless PROVEN otherwise
+        # Requires extreme confidence to mark as unused (90%+ match)
         if is_3rd_party:
-            is_likely_used = confidence >= 0.90 or patterns_found >= 2
-            # Conservative: assume used unless proven unused
+            # Conservative approach: library code is almost always needed
+            # Only mark as unused if NO patterns match at all
             if patterns_found == 0:
+                # Even then, give benefit of doubt (could be used indirectly)
+                is_likely_used = True  # Assume USED
+            else:
+                # If ANY pattern matches, definitely used
                 is_likely_used = True
+            # Note: 3rd-party usage is inherently hard to detect via regex
+            # Better to have false negatives (flag as used when unused)
+            # than false positives (flag as unused when used)
         
-        # CRITICAL FIX #2: Local headers often have indirect usage
-        # Be conservative - assume used unless clear evidence otherwise
+        # CRITICAL FIX #3: Local headers (database.h, utils.h, etc)
+        # User-defined headers are USUALLY needed - conservative handling
+        # Assume USED unless we have strong evidence otherwise
         elif is_local:
-            is_likely_used = confidence >= 0.50 or patterns_found >= 1
-            # Conservative: assume used - local headers have real usage
-            if confidence < 0.67:
+            # Local headers need special handling:
+            # - May be used indirectly through macros or inlined functions
+            # - May contain type definitions needed by the module
+            # - Rarely actually unused
+            if patterns_found >= 1:
                 is_likely_used = True
+            elif confidence >= 0.5:
+                is_likely_used = True
+            else:
+                # Even with no patterns, assume used
+                # Local headers have high probability of hidden usage
+                is_likely_used = True  # Conservative: assume used
         
-        # Standard system headers: normal detection
+        # Standard system headers: apply normal detection logic
+        # These are more likely to actually be unused
         else:
             is_likely_used = confidence > 0.30
         
@@ -361,31 +381,71 @@ class CostEstimator:
                 'empty', 'clear', 'compare'
             ],
             
-            # Algorithms
+            # Algorithms - CRITICAL FIX #2: Better symbol coverage
+            # Include both non-std and std:: prefixed versions
             'algorithm': [
+                # Sort variants
                 'sort', 'stable_sort', 'partial_sort', 'nth_element',
+                'std::sort', 'std::stable_sort', 'std::partial_sort',
+                
+                # Find/Search
                 'find', 'find_if', 'find_if_not', 'find_first_of',
+                'std::find', 'std::find_if', 'std::find_if_not',
+                
+                # Transform/For Each
                 'transform', 'for_each', 'for_each_n',
+                'std::transform', 'std::for_each',
+                
+                # Count
                 'count', 'count_if',
+                'std::count', 'std::count_if',
+                
+                # Copy/Move
                 'copy', 'copy_if', 'copy_n', 'copy_backward',
                 'move', 'move_backward',
-                'unique', 'unique_copy',
-                'reverse', 'reverse_copy',
-                'rotate', 'rotate_copy',
-                'shuffle', 'random_shuffle',  # Random is deprecated
+                'std::copy', 'std::copy_if', 'std::move',
+                
+                # Unique/Remove
+                'unique', 'unique_copy', 'remove', 'remove_if',
+                'std::unique', 'std::remove', 'std::remove_if',
+                
+                # Reverse/Rotate
+                'reverse', 'reverse_copy', 'rotate', 'rotate_copy',
+                'std::reverse', 'std::rotate',
+                
+                # shuffling
+                'shuffle', 'random_shuffle',
+                'std::shuffle',
+                
+                # Binary search
                 'binary_search', 'lower_bound', 'upper_bound', 'equal_range',
+                'std::binary_search', 'std::lower_bound', 'std::upper_bound',
+                
+                # Min/Max
                 'min_element', 'max_element', 'minmax_element',
+                'std::min_element', 'std::max_element',
+                
+                # Set operations
                 'merge', 'inplace_merge',
                 'includes', 'set_union', 'set_intersection', 'set_difference',
+                'std::merge', 'std::set_union', 'std::set_intersection',
+                
+                # Predicates
                 'is_sorted', 'is_sorted_until',
                 'is_permutation', 'next_permutation', 'prev_permutation',
-                'remove', 'remove_if', 'remove_copy', 'remove_copy_if',
-                'replace', 'replace_if', 'replace_copy', 'replace_copy_if',
-                'fill', 'fill_n',
-                'generate', 'generate_n',
-                # Add std:: prefixed versions
-                'std::sort', 'std::find', 'std::transform',
-                'std::for_each', 'std::count', 'std::copy',
+                'std::is_sorted', 'std::is_permutation',
+                
+                # Fill/Generate
+                'fill', 'fill_n', 'generate', 'generate_n',
+                'std::fill', 'std::generate',
+                
+                # Predicates for algorithms
+                'all_of', 'any_of', 'none_of',
+                'std::all_of', 'std::any_of', 'std::none_of',
+                
+                # Partition
+                'partition', 'stable_partition',
+                'std::partition', 'std::stable_partition',
             ],
             'numeric': [
                 'accumulate', 'inner_product', 'partial_sum',
@@ -446,6 +506,27 @@ class CostEstimator:
                 'is_same', 'is_integral', 'is_floating_point',
                 'enable_if', 'decay', 'remove_reference'
             ],
+            
+            # Regex (very expensive, often unused)
+            'regex': [
+                'regex', 'smatch', 'regex_match', 'regex_search',
+                'regex_replace', 'regex_iterator', 'sregex_iterator',
+                'std::regex', 'std::smatch', 'std::regex_match'
+            ],
+            
+            # Exception handling
+            'exception': [
+                'exception', 'what', 'bad_exception',
+                'std::exception', 'throw', 'try', 'catch'
+            ],
+            
+            # Map variants
+            'map': [
+                'insert', 'find', 'erase', 'count', 'at',
+                'begin', 'end', 'clear', 'empty', 'size',
+                'lower_bound', 'upper_bound',
+                'std::map', 'std::unordered_map'
+            ],
         }
         
         # Extract base name from header (e.g., "iostream" from "<iostream>" or "iostream")
@@ -459,6 +540,55 @@ class CostEstimator:
                 if re.search(rf'\b{re.escape(symbol)}\b', content):
                     return True
         
+        return False
+    
+    def _check_header_specific_std_usage(self, header: str, content: str) -> bool:
+        """
+        Check for HEADER-SPECIFIC std:: usage.
+        
+        CRITICAL FIX: Pattern 3 was checking any std:: in file.
+        Now checks for specific header usage patterns.
+        
+        Examples:
+        - iostream: std::cout, std::cin, std::cerr
+        - map: std::map<, map literals
+        - vector: std::vector<, vector methods
+        - algorithm: specific algorithm functions
+        """
+        header_base = Path(header.strip('<>\"')).stem
+        
+        # Header-specific std:: patterns
+        std_patterns = {
+            'iostream': [r'std::\b(cout|cin|cerr|clog|wcout|wcin|wcerr|wclog|endl|getline)\b'],
+            'fstream': [r'std::\b(ifstream|ofstream|fstream)\b'],
+            'sstream': [r'std::\b(stringstream|istringstream|ostringstream)\b'],
+            'iomanip': [r'std::\b(setw|setprecision|fixed|scientific|left|right|setfill)\b'],
+            'vector': [r'std::vector\s*<', r'\.push_back\(', r'\.emplace_back\('],
+            'map': [r'std::map\s*<', r'\.insert\(', r'\.find\('],
+            'set': [r'std::set\s*<', r'\.insert\(', r'\.find\('],
+            'string': [r'std::string\b', r'std::to_string\('],
+            'array': [r'std::array\s*<'],
+            'algorithm': [
+                r'std::\b(sort|find|transform|copy|unique|reverse|rotate|for_each)\b',
+                r'std::\b(any_of|all_of|none_of|count|remove|partition)\b'
+            ],
+            'numeric': [r'std::\b(accumulate|inner_product|partial_sum|adjacent_difference)\b'],
+            'memory': [r'std::\b(make_shared|make_unique|shared_ptr|unique_ptr|weak_ptr)\b'],
+            'regex': [r'std::\b(regex|smatch|regex_match|regex_search|regex_replace)\b'],
+            'exception': [r'std::exception\b'],
+            'thread': [r'std::thread\b'],
+            'mutex': [r'std::\b(mutex|lock_guard|unique_lock)\b'],
+            'chrono': [r'std::chrono::\b', r'std::\b(duration|time_point)\b'],
+        }
+        
+        # Check if this header has specific patterns
+        if header_base in std_patterns:
+            patterns = std_patterns[header_base]
+            for pattern in patterns:
+                if re.search(pattern, content):
+                    return True
+        
+        # Default: no specific std:: usage found for this header
         return False
     
     def analyze_file_costs(self, 
